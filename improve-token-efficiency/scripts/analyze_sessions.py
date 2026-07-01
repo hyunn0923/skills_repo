@@ -15,6 +15,7 @@ import glob
 import json
 import os
 import sys
+import tempfile
 from collections import defaultdict
 
 # Anthropic pricing (USD per 1M tokens). Keys match the exact model string the
@@ -22,8 +23,10 @@ from collections import defaultdict
 PRICING = {
     "claude-opus-4-6":   {"in": 15.00, "out": 75.00, "cw5": 18.75, "cw1h": 30.00, "cr": 1.50},
     "claude-opus-4-7":   {"in": 15.00, "out": 75.00, "cw5": 18.75, "cw1h": 30.00, "cr": 1.50},
+    "claude-opus-4-8":   {"in": 15.00, "out": 75.00, "cw5": 18.75, "cw1h": 30.00, "cr": 1.50},
     "claude-sonnet-4-6": {"in":  3.00, "out": 15.00, "cw5":  3.75, "cw1h":  6.00, "cr": 0.30},
     "claude-sonnet-4-5": {"in":  3.00, "out": 15.00, "cw5":  3.75, "cw1h":  6.00, "cr": 0.30},
+    "claude-sonnet-5":   {"in":  3.00, "out": 15.00, "cw5":  3.75, "cw1h":  6.00, "cr": 0.30},
     "claude-haiku-4-5":  {"in":  0.80, "out":  4.00, "cw5":  1.00, "cw1h":  1.60, "cr": 0.08},
     "<synthetic>":       {"in":  0.00, "out":  0.00, "cw5":  0.00, "cw1h":  0.00, "cr": 0.00},
 }
@@ -33,9 +36,14 @@ DEFAULT_PRICE = PRICING["claude-opus-4-6"]
 
 
 def encode_repo_path(repo_path):
-    """Turn /Users/x/Projects/Foo into -Users-x-Projects-Foo."""
+    """Turn a repo path into the Claude CLI's session-dir name.
+
+    macOS/Linux: /Users/x/Projects/Foo -> -Users-x-Projects-Foo
+    Windows:     C:\\dev             -> C--dev  (drive colon and every
+                 separator collapse to '-'; the CLI does the same).
+    """
     abs_path = os.path.abspath(os.path.expanduser(repo_path))
-    return abs_path.replace("/", "-")
+    return abs_path.replace("\\", "-").replace("/", "-").replace(":", "-")
 
 
 def resolve_sessions_dir(args):
@@ -80,7 +88,7 @@ def analyze_session(path):
     }
 
     try:
-        with open(path, "r") as f:
+        with open(path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -247,7 +255,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", help="Repository path (default: cwd)")
     ap.add_argument("--sessions-dir", help="Direct path to ~/.claude/projects/<encoded>/")
-    ap.add_argument("--out", default="/tmp/session_analysis.json", help="Output JSON path")
+    ap.add_argument("--out", default=os.path.join(tempfile.gettempdir(), "session_analysis.json"),
+                    help="Output JSON path (default: OS temp dir)")
     args = ap.parse_args()
 
     sessions_dir = resolve_sessions_dir(args)
@@ -296,13 +305,18 @@ def main():
         totals["cache_read"] / totals["total_input_tokens"] if totals["total_input_tokens"] else 0
     )
 
-    results.sort(key=lambda r: r["cost_usd"], reverse=True)
+    # Sort by token volume (not dollars) — the honest severity signal.
+    results.sort(key=lambda r: r["total_input_tokens"], reverse=True)
 
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         json.dump({"totals": totals, "sessions": results}, f, default=str, indent=2)
 
     print(f"[ok] wrote {args.out}")
-    print(f"     {len(results)} sessions, ${totals['cost_usd']:.2f}, cache hit {totals['cache_hit_ratio']*100:.1f}%")
+    print(f"     {len(results)} sessions | {totals['output_tokens']:,} output tok | "
+          f"cache hit {totals['cache_hit_ratio']*100:.1f}%")
+    print("     note: `cost_usd` in the JSON is an Anthropic API *list-price* upper bound "
+          "(Opus rates, cache writes at 1h) — NOT your subscription bill. Use it only to "
+          "rank sessions relative to each other.")
 
 
 if __name__ == "__main__":

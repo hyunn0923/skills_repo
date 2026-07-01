@@ -8,6 +8,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from collections import Counter
 
 # Must mirror analyze_sessions.py. Only used here for dollar-value estimates in
@@ -182,8 +183,13 @@ def build_html(data, repo_name):
   <h1>Claude Code 세션 효율 리포트</h1>
   <div class="sub">{repo_name} · 활성 세션 {n}개 · 세션 디렉터리: <code>{totals.get('sessions_dir', '')}</code></div>
 
+  <div class="kpi" style="border-left:4px solid var(--warn);margin:12px 0;padding:10px 14px">
+    ⚠️ 모든 <b>$금액</b>은 Anthropic <b>API 정가(Opus 기준·캐시쓰기 1h) 상한 추정치</b>이며 <b>실제 구독 청구액이 아닙니다.</b>
+    구독제(Max/Pro) 사용 시 실제 지불액은 정액입니다. 금액은 세션 간 <b>상대 비교</b> 용도로만 보세요.
+  </div>
+
   <div class="grid kpis">
-    <div class="kpi"><div class="l">누적 비용</div><div class="v">${totals['cost_usd']:.2f}</div><div class="s">세션당 평균 ${totals['cost_usd']/n:.2f}</div></div>
+    <div class="kpi"><div class="l">추정 비용(API 정가 상한)</div><div class="v">${totals['cost_usd']:.2f}</div><div class="s">세션당 평균 ${totals['cost_usd']/n:.2f} · 실제 청구 아님</div></div>
     <div class="kpi"><div class="l">총 토큰 처리</div><div class="v">{totals['total_input_tokens']/1e6:.0f}M</div><div class="s">입력(캐시 포함) 기준</div></div>
     <div class="kpi"><div class="l">캐시 적중률</div><div class="v good">{totals['cache_hit_ratio']*100:.1f}%</div><div class="s">cache_read ÷ 총 입력</div></div>
     <div class="kpi"><div class="l">출력 토큰</div><div class="v">{totals['output_tokens']/1e6:.2f}M</div><div class="s">실제 assistant 산출</div></div>
@@ -397,8 +403,8 @@ new Chart(document.getElementById('scatter'), {{
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", default="/tmp/session_analysis.json")
-    ap.add_argument("--out", default="/tmp/efficiency_report.html")
+    ap.add_argument("--input", default=os.path.join(tempfile.gettempdir(), "session_analysis.json"))
+    ap.add_argument("--out", default=os.path.join(tempfile.gettempdir(), "efficiency_report.html"))
     ap.add_argument("--repo-name", default=None, help="Label shown in report header")
     args = ap.parse_args()
 
@@ -407,7 +413,7 @@ def main():
         print(f"        run analyze_sessions.py first", file=sys.stderr)
         sys.exit(2)
 
-    with open(args.input) as f:
+    with open(args.input, encoding="utf-8") as f:
         data = json.load(f)
 
     if not data.get("sessions"):
@@ -419,11 +425,11 @@ def main():
     ) or "Claude Code sessions"
 
     html = build_html(data, repo_name)
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         f.write(html)
 
     print(f"[ok] wrote {args.out}")
-    print(f"     open it: open {args.out}")
+    print(f"     open it: {args.out}")
 
 
 if __name__ == "__main__":

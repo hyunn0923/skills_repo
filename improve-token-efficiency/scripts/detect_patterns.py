@@ -24,6 +24,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 from collections import defaultdict
 
 # Pricing (USD per 1M tokens). We price waste at Opus rates; if the actual
@@ -51,7 +52,9 @@ SUBAGENT_OVERHEAD_TOKENS = 3000        # P5: per-call system prompt + framing
 
 
 def encode_repo_path(p):
-    return os.path.abspath(os.path.expanduser(p)).replace("/", "-")
+    # Collapse Windows separators and the drive colon too (C:\dev -> C--dev).
+    ap = os.path.abspath(os.path.expanduser(p))
+    return ap.replace("\\", "-").replace("/", "-").replace(":", "-")
 
 
 def stringify(obj):
@@ -94,7 +97,7 @@ def analyze_session(path):
     """Walk one session JSONL, build per-turn trajectories, run all 5 detectors."""
     sid = os.path.basename(path).replace(".jsonl", "")
     try:
-        with open(path) as f:
+        with open(path, "r", encoding="utf-8") as f:
             records = [json.loads(line) for line in f if line.strip()]
     except Exception:
         return None
@@ -400,7 +403,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", help="Repo path (default cwd)")
     ap.add_argument("--sessions-dir")
-    ap.add_argument("--out", default="/tmp/pattern_analysis.json")
+    ap.add_argument("--out", default=os.path.join(tempfile.gettempdir(), "pattern_analysis.json"))
     args = ap.parse_args()
 
     if args.sessions_dir:
@@ -451,20 +454,24 @@ def main():
         "total_waste_usd": round(sum(p["total_waste_usd"] for p in pattern_totals.values()), 2),
     }
 
+    # Rank by wasted *tokens* — the honest, subscription-neutral signal.
     sessions.sort(
-        key=lambda s: sum(f["waste_usd"] for f in s["findings"].values()),
+        key=lambda s: sum(f["waste_tokens"] for f in s["findings"].values()),
         reverse=True,
     )
 
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         json.dump({"totals": totals, "sessions": sessions}, f, default=str, indent=2)
 
     print(f"[ok] wrote {args.out}")
     print(f"     {totals['sessions_total']} sessions, {totals['sessions_with_any_pattern']} flagged")
-    print(f"     total estimated waste: ${totals['total_waste_usd']:.2f}")
+    print(f"     {'pattern':22s}  {'sessions':>8s}  {'waste tokens':>14s}")
     for k in pattern_keys:
         v = pattern_totals[k]
-        print(f"       {k:22s}  {v['affected_sessions']:3d} sessions  ${v['total_waste_usd']:.2f}")
+        print(f"       {k:22s}  {v['affected_sessions']:6d}  {v['total_waste_tokens']:>14,d}")
+    print("     note: `waste_usd`/`total_waste_usd` in the JSON are Anthropic API *list-price* "
+          "upper bounds, NOT your subscription bill. `context_bloat` in particular counts context "
+          "you must carry, so read it as 'sessions to /compact or split', not money lost.")
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 
 PATTERN_KO_NAME = {
     "context_bloat": "컨텍스트 부풀림",
@@ -242,6 +243,11 @@ def build_html(data):
 <body>
   <h1>Claude Code — 5대 비효율 패턴 리포트</h1>
   <div class="sub">{totals['sessions_dir']}</div>
+  <div class="kpi" style="border-left:4px solid var(--warn);margin:12px 0;padding:10px 14px">
+    ⚠️ 모든 <b>낭비액($)</b>은 Anthropic <b>API 정가(Opus·1h write) 상한 추정</b>이며 <b>실제 청구액이 아닙니다.</b>
+    특히 <b>context_bloat</b>는 어차피 들고 가야 하는 컨텍스트를 낭비로 계산하므로,
+    "돈 손실"이 아니라 <b>/compact 하거나 분리할 세션 목록</b>으로 읽으세요.
+  </div>
 
   {kpi_html}
 
@@ -314,22 +320,22 @@ new Chart(document.getElementById('patternBar'), {{
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--input", default="/tmp/pattern_analysis.json")
-    ap.add_argument("--out", default="/tmp/patterns_report.html")
+    ap.add_argument("--input", default=os.path.join(tempfile.gettempdir(), "pattern_analysis.json"))
+    ap.add_argument("--out", default=os.path.join(tempfile.gettempdir(), "patterns_report.html"))
     args = ap.parse_args()
 
     if not os.path.exists(args.input):
         print(f"[error] missing {args.input}. Run detect_patterns.py first.", file=sys.stderr)
         sys.exit(2)
 
-    with open(args.input) as f:
+    with open(args.input, encoding="utf-8") as f:
         data = json.load(f)
 
     html = build_html(data)
-    with open(args.out, "w") as f:
+    with open(args.out, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"[ok] wrote {args.out}")
-    print(f"     open: open {args.out}")
+    print(f"     open: {args.out}")
 
 
 if __name__ == "__main__":
